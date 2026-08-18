@@ -12,7 +12,8 @@
     "pino": "^8.14.1",
     "fs": "^0.0.1-security",
     "moment": "^2.29.4",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
