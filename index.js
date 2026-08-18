@@ -1,21 +1,35 @@
+/**
+ * MARV-C V1 - WhatsApp Bot
+ * Simple WhatsApp Automation Bot
+ */
+
 const { 
     default: makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason,
-    Browsers
+    Browsers,
+    makeCacheableSignalKeyStore
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
+const path = require('path');
 const config = require('./config');
+const settings = require('./settings');
 const { handleCommand, getMenuText } = require('./commands');
 const express = require('express');
+const chalk = require('chalk');
+const NodeCache = require('node-cache');
 
-// Force clean session on startup
-if (fs.existsSync('auth_info')) {
-    console.log('🗑️ Clearing old session...');
-    fs.rmSync('auth_info', { recursive: true, force: true });
-    console.log('✅ Session cleared!');
-}
+// Ensure directories exist
+const ensureDirectories = () => {
+    const dirs = ['./session', './data', './temp'];
+    dirs.forEach(dir => {
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+    });
+};
+ensureDirectories();
 
 let sock;
 let startTime = Date.now();
@@ -55,7 +69,7 @@ function getUptime() {
     return `${String(hours).padStart(2, '0')}hrs${String(minutes).padStart(2, '0')}min${String(seconds).padStart(2, '0')}sec`;
 }
 
-// Send welcome message
+// Send welcome message to owner
 async function sendWelcomeMessage() {
     if (welcomeSent || !sock || !isConnected) return;
     
@@ -80,10 +94,7 @@ async function sendWelcomeMessage() {
                               `_Example: *${config.PREFIX}help*_\n\n` +
                               `✨ *Enjoy automating with MARV-C V1!* ✨`;
         
-        await sock.sendMessage(ownerJid, {
-            text: welcomeMessage
-        });
-        
+        await sock.sendMessage(ownerJid, { text: welcomeMessage });
         console.log('📨 Welcome message sent to owner!');
         welcomeSent = true;
         
@@ -133,7 +144,8 @@ async function connectToWhatsApp() {
     
     try {
         console.log('🔌 Initializing WhatsApp connection...');
-        const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+        const { state, saveCreds } = await useMultiFileAuthState(config.SESSION_DIR || './session');
+        const msgRetryCounterCache = new NodeCache();
         
         sock = makeWASocket({
             logger: pino({ level: 'silent' }),
@@ -146,13 +158,19 @@ async function connectToWhatsApp() {
             keepAliveIntervalMs: 10000,
             markOnlineOnConnect: true,
             shouldSyncHistoryMessage: () => false,
+            msgRetryCounterCache,
         });
 
         // Handle connection updates
         sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect } = update;
+            const { connection, lastDisconnect, qr } = update;
             
             console.log(`📡 Connection update: ${connection}`);
+            
+            if (qr) {
+                console.log(chalk.yellow('📱 QR Code generated. Please scan with WhatsApp.'));
+                console.log('Alternative: Use pairing code via web interface');
+            }
             
             if (connection === 'close') {
                 const code = lastDisconnect?.error?.output?.statusCode;
@@ -180,6 +198,8 @@ async function connectToWhatsApp() {
                 
                 console.log(`📱 Bot connected as: ${sock.user?.name || 'Unknown'}`);
                 console.log(`📱 Phone number: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
+                console.log(chalk.green(`\n🤖 ${config.BOT_NAME} is now online!`));
+                console.log(chalk.blue(`📱 Connected to: ${sock.user?.id?.split(':')[0] || 'Unknown'}`));
                 
                 // Send welcome message after connection
                 setTimeout(async () => {
@@ -215,6 +235,7 @@ async function connectToWhatsApp() {
                 if (msg.key.fromMe) return;
                 if (remoteJid === 'status@broadcast') return;
                 
+                // Extract message text
                 let messageText = '';
                 if (msg.message?.conversation) {
                     messageText = msg.message.conversation;
@@ -234,11 +255,13 @@ async function connectToWhatsApp() {
                 const sender = msg.key.participant || msg.key.remoteJid;
                 const isOwner = sender === `${config.OWNER_NUMBER}@s.whatsapp.net`;
                 
+                // For personal inbox, process only owner messages
                 if (!isGroup && !isOwner) {
                     console.log(`⏭️ Not owner (${sender}), skipping`);
                     return;
                 }
                 
+                // Check for commands
                 if (messageText.startsWith(config.PREFIX)) {
                     console.log(`✅ Command detected: ${messageText}`);
                     const command = messageText.slice(1).trim();
@@ -300,7 +323,8 @@ app.get('/status', (req, res) => {
         uptime: isConnected ? getUptime() : 'Offline',
         pairingCode: pairingCode || 'None',
         welcomeSent: welcomeSent,
-        reconnectAttempts: reconnectAttempts
+        reconnectAttempts: reconnectAttempts,
+        version: config.VERSION
     });
 });
 
@@ -385,6 +409,7 @@ app.get('/', (req, res) => {
                 }
                 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
                 .info { margin-top: 15px; font-size: 13px; color: #888; text-align: center; }
+                .version { text-align: center; margin-top: 20px; font-size: 12px; color: #aaa; }
                 @media (max-width: 600px) {
                     .container { padding: 20px; }
                     .code-number { font-size: 28px; letter-spacing: 4px; }
@@ -410,6 +435,7 @@ app.get('/', (req, res) => {
                 <button class="btn" id="generateBtn">Get Pairing Code</button>
                 
                 <div class="info" id="info">Enter your number and click the button</div>
+                <div class="version">Version ${config.VERSION}</div>
             </div>
             
             <script>
@@ -497,6 +523,7 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`🌐 Web server running on port ${PORT}`);
+    console.log(`📱 Visit your Render URL to get pairing code`);
 });
 
 // Start the bot
@@ -513,3 +540,11 @@ setInterval(() => {
         connectToWhatsApp();
     }
 }, 30000);
+
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled Rejection:', err);
+});
