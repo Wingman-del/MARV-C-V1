@@ -1,18 +1,24 @@
 {
   "name": "marv-c-v1",
   "version": "1.0.0",
-  "description": "MARV-C WhatsApp Automation Bot",
+  "description": "MARV-C V1 - WhatsApp Automation Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start:optimized": "node --max-old-space-size=512 --optimize-for-size --gc-interval=100 index.js",
+    "cleanup": "node cleanup.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.5.0",
     "express": "^4.18.2",
     "pino": "^8.14.1",
     "fs": "^0.0.1-security",
-    "moment": "^2.29.4"
+    "moment": "^2.29.4",
+    "qrcode-terminal": "^0.12.0",
+    "axios": "^1.6.0",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.4.5",
+    "node-cache": "^5.1.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
