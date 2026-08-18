@@ -1,7 +1,7 @@
 module.exports = {
     BOT_NAME: 'MARV-C V1',
     OWNER_NAME: 'Marv C',
-    OWNER_NUMBER: '254759083715', // Default number (without +)
+    OWNER_NUMBER: '254759083715', // Your WhatsApp number without +
     PREFIX: '.',
     REPO_LINK: 'https://github.com/Wingman-del/MARV-C-V1',
     SESSION_FILE: './session.json',
