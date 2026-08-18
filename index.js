@@ -39,6 +39,7 @@ let isConnecting = false;
 let welcomeSent = false;
 let isConnected = false;
 let reconnectAttempts = 0;
+let pairingCodeGenerated = false;
 
 const app = express();
 app.use(express.json());
@@ -113,9 +114,16 @@ async function generatePairingCode(phoneNumber) {
             return null;
         }
         
+        // Check if already connected
+        if (isConnected) {
+            console.log('✅ Bot already connected!');
+            return null;
+        }
+        
         console.log(`🔑 Generating pairing code for ${cleanNumber}...`);
         const code = await sock.requestPairingCode(cleanNumber);
         pairingCode = code;
+        pairingCodeGenerated = true;
         
         console.log('\n========================================');
         console.log(`🔑 YOUR PAIRING CODE: ${code}`);
@@ -129,6 +137,7 @@ async function generatePairingCode(phoneNumber) {
     } catch (error) {
         console.log('⚠️ Failed to generate pairing code:', error.message);
         pairingCode = '';
+        pairingCodeGenerated = false;
         return null;
     }
 }
@@ -159,6 +168,8 @@ async function connectToWhatsApp() {
             markOnlineOnConnect: true,
             shouldSyncHistoryMessage: () => false,
             msgRetryCounterCache,
+            // Disable QR code printing
+            printQRInTerminal: false,
         });
 
         // Handle connection updates
@@ -167,7 +178,8 @@ async function connectToWhatsApp() {
             
             console.log(`📡 Connection update: ${connection}`);
             
-            if (qr) {
+            // Only handle QR code if not using pairing code
+            if (qr && !pairingCodeGenerated) {
                 console.log(chalk.yellow('📱 QR Code generated. Please scan with WhatsApp.'));
                 console.log('Alternative: Use pairing code via web interface');
             }
@@ -179,6 +191,7 @@ async function connectToWhatsApp() {
                 isConnecting = false;
                 isConnected = false;
                 welcomeSent = false;
+                pairingCodeGenerated = false;
                 
                 if (shouldReconnect && reconnectAttempts < 10) {
                     reconnectAttempts++;
@@ -194,6 +207,7 @@ async function connectToWhatsApp() {
                 isConnecting = false;
                 reconnectAttempts = 0;
                 pairingCode = '';
+                pairingCodeGenerated = false;
                 startTime = Date.now();
                 
                 console.log(`📱 Bot connected as: ${sock.user?.name || 'Unknown'}`);
@@ -297,21 +311,23 @@ app.post('/generate-code', async (req, res) => {
         return res.json({ success: false, error: 'Invalid phone number format' });
     }
     
-    if (!isConnected) {
-        if (!sock) {
-            await connectToWhatsApp();
-            await new Promise(resolve => setTimeout(resolve, 3000));
-        }
-        
-        const code = await generatePairingCode(cleanNumber);
-        
-        if (code) {
-            res.json({ success: true, code: code, phoneNumber: cleanNumber });
-        } else {
-            res.json({ success: false, error: 'Failed to generate code' });
-        }
+    // Check if already connected
+    if (isConnected) {
+        return res.json({ success: false, error: 'Bot already connected!' });
+    }
+    
+    // If not connected, try to generate code
+    if (!sock) {
+        await connectToWhatsApp();
+        await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    
+    const code = await generatePairingCode(cleanNumber);
+    
+    if (code) {
+        res.json({ success: true, code: code, phoneNumber: cleanNumber });
     } else {
-        res.json({ success: false, error: 'Bot already connected!' });
+        res.json({ success: false, error: 'Failed to generate code. Please try again.' });
     }
 });
 
@@ -365,6 +381,7 @@ app.get('/', (req, res) => {
                 }
                 .status-box.online { background: #d4edda; color: #155724; }
                 .status-box.waiting { background: #d1ecf1; color: #0c5460; }
+                .status-box.error { background: #f8d7da; color: #721c24; }
                 .status-dot {
                     display: inline-block;
                     width: 12px;
@@ -374,6 +391,7 @@ app.get('/', (req, res) => {
                 }
                 .status-dot.online { background: #4CAF50; }
                 .status-dot.waiting { background: #FF9800; }
+                .status-dot.error { background: #f44336; }
                 .code-display {
                     background: #f8f9fa;
                     border-radius: 12px;
@@ -410,6 +428,14 @@ app.get('/', (req, res) => {
                 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
                 .info { margin-top: 15px; font-size: 13px; color: #888; text-align: center; }
                 .version { text-align: center; margin-top: 20px; font-size: 12px; color: #aaa; }
+                .success-message {
+                    background: #d4edda;
+                    color: #155724;
+                    padding: 15px;
+                    border-radius: 10px;
+                    margin: 10px 0;
+                    display: none;
+                }
                 @media (max-width: 600px) {
                     .container { padding: 20px; }
                     .code-number { font-size: 28px; letter-spacing: 4px; }
@@ -426,9 +452,14 @@ app.get('/', (req, res) => {
                     <span id="statusText">Starting...</span>
                 </div>
                 
+                <div id="successMessage" class="success-message">
+                    ✅ Bot is connected! Check your WhatsApp inbox.
+                </div>
+                
                 <div id="codeDisplay" class="code-display">
                     <div style="font-size:14px;color:#666;margin-bottom:5px;">🔑 Pairing Code</div>
                     <div class="code-number" id="codeNumber">------</div>
+                    <div style="font-size:12px;color:#888;margin-top:8px;">Enter this code in WhatsApp → Settings → Linked Devices</div>
                 </div>
                 
                 <input type="text" id="phoneInput" placeholder="Enter number (e.g., 254759083715)">
@@ -439,6 +470,8 @@ app.get('/', (req, res) => {
             </div>
             
             <script>
+                let statusInterval;
+                
                 async function updateStatus() {
                     try {
                         const response = await fetch('/status');
@@ -449,26 +482,37 @@ app.get('/', (req, res) => {
                         const statusText = document.getElementById('statusText');
                         const codeNumber = document.getElementById('codeNumber');
                         const info = document.getElementById('info');
+                        const successMessage = document.getElementById('successMessage');
+                        const codeDisplay = document.getElementById('codeDisplay');
+                        const generateBtn = document.getElementById('generateBtn');
                         
                         if (data.connected) {
                             statusBox.className = 'status-box online';
                             statusDot.className = 'status-dot online';
                             statusText.textContent = '✅ Connected as ' + data.phoneNumber;
-                            document.getElementById('codeDisplay').style.display = 'none';
+                            successMessage.style.display = 'block';
+                            codeDisplay.style.display = 'none';
                             info.textContent = '✅ Bot is online! Send .help in WhatsApp';
+                            generateBtn.disabled = true;
+                            generateBtn.textContent = 'Already Connected ✓';
                         } else {
                             statusBox.className = 'status-box waiting';
                             statusDot.className = 'status-dot waiting';
                             statusText.textContent = '🔄 Waiting for connection...';
+                            successMessage.style.display = 'none';
                             
                             if (data.pairingCode && data.pairingCode !== 'None') {
                                 codeNumber.textContent = data.pairingCode;
-                                document.getElementById('codeDisplay').style.display = 'block';
+                                codeDisplay.style.display = 'block';
                                 info.textContent = '⏰ Enter this code in WhatsApp → Settings → Linked Devices';
+                                generateBtn.disabled = false;
+                                generateBtn.textContent = 'Get New Code';
                             } else {
-                                document.getElementById('codeDisplay').style.display = 'block';
+                                codeDisplay.style.display = 'block';
                                 codeNumber.textContent = '------';
                                 info.textContent = 'Enter your number and click the button';
+                                generateBtn.disabled = false;
+                                generateBtn.textContent = 'Get Pairing Code';
                             }
                         }
                     } catch (error) {
@@ -476,7 +520,8 @@ app.get('/', (req, res) => {
                     }
                 }
                 
-                setInterval(updateStatus, 3000);
+                // Update status every 3 seconds
+                statusInterval = setInterval(updateStatus, 3000);
                 updateStatus();
                 
                 document.getElementById('generateBtn').addEventListener('click', async () => {
@@ -502,7 +547,7 @@ app.get('/', (req, res) => {
                         const data = await response.json();
                         
                         if (data.success) {
-                            alert('✅ Code generated! Check the status above.');
+                            alert('✅ Code generated! Enter it in WhatsApp settings.');
                             updateStatus();
                         } else {
                             alert('❌ ' + (data.error || 'Failed to generate code'));
