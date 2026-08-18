@@ -2,7 +2,7 @@ const {
     default: makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason,
-    makeInMemoryStore,
+    Browsers,
     jidNormalizedUser,
     downloadMediaMessage
 } = require('@whiskeysockets/baileys');
@@ -12,8 +12,7 @@ const moment = require('moment');
 const config = require('./config');
 const { handleCommand } = require('./commands');
 
-const store = makeInMemoryStore({ logger: pino().child({ level: 'silent' }) });
-
+// Remove the makeInMemoryStore line - it's not needed
 let sock;
 let startTime = Date.now();
 let isTypingTimeout = null;
@@ -48,12 +47,10 @@ async function connectToWhatsApp() {
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: true,
-        browser: ['MARV-C V1', 'Chrome', '1.0.0'],
+        browser: Browsers.macOS('Chrome'),
         syncFullHistory: false,
         generateHighQualityLinkPreview: true,
     });
-
-    store.bind(sock.ev);
 
     // Set online presence
     sock.ev.on('connection.update', async (update) => {
@@ -66,9 +63,11 @@ async function connectToWhatsApp() {
                 connectToWhatsApp();
             }
         } else if (connection === 'open') {
-            console.log('MARV-C V1 Bot is Online!');
+            console.log('✅ MARV-C V1 Bot is Online!');
             await updatePresence('available');
             startTime = Date.now();
+            console.log(`📱 Bot connected as: ${sock.user?.name || 'Unknown'}`);
+            console.log(`📱 Phone number: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
         }
     });
 
@@ -78,42 +77,46 @@ async function connectToWhatsApp() {
     // Message handler
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.key.fromMe && !msg.key.remoteJid) return;
+        if (!msg || !msg.key) return;
         
         const remoteJid = msg.key.remoteJid;
-        const messageText = msg.message?.conversation || 
-                           msg.message?.extendedTextMessage?.text || 
-                           '';
+        if (!remoteJid) return;
         
-        // Only respond to messages from personal inbox (not groups if not configured)
-        const isGroup = remoteJid.endsWith('@g.us');
-        const isOwner = remoteJid === `${config.OWNER_NUMBER}@s.whatsapp.net`;
+        // Ignore messages from the bot itself
+        if (msg.key.fromMe) return;
         
-        // For personal inbox, process all messages if from owner
-        if (!isGroup && isOwner) {
-            // Show typing indicator
-            await sendTyping(remoteJid);
-            
-            // Check for commands
-            if (messageText.startsWith(config.PREFIX)) {
-                const command = messageText.slice(1).trim();
-                await handleCommand(sock, remoteJid, command, msg, config, startTime);
-            }
-            
-            // Handle anti-delete
-            if (config.ANTI_DELETE && msg.message?.protocolMessage) {
-                const deletedMsg = msg.message.protocolMessage.key;
-                // Store deleted messages logic here
-            }
+        // Check if it's a status message
+        if (remoteJid === 'status@broadcast') return;
+        
+        // Get message text
+        let messageText = '';
+        if (msg.message?.conversation) {
+            messageText = msg.message.conversation;
+        } else if (msg.message?.extendedTextMessage?.text) {
+            messageText = msg.message.extendedTextMessage.text;
+        } else if (msg.message?.imageMessage?.caption) {
+            messageText = msg.message.imageMessage.caption;
+        } else if (msg.message?.videoMessage?.caption) {
+            messageText = msg.message.videoMessage.caption;
         }
         
-        // Group messages
-        if (isGroup) {
-            // Check if command
-            if (messageText.startsWith(config.PREFIX)) {
-                const command = messageText.slice(1).trim();
-                await handleCommand(sock, remoteJid, command, msg, config, startTime);
-            }
+        // Only process if there's text
+        if (!messageText) return;
+        
+        const isGroup = remoteJid.endsWith('@g.us');
+        const sender = msg.key.participant || msg.key.remoteJid;
+        const isOwner = sender === `${config.OWNER_NUMBER}@s.whatsapp.net`;
+        
+        // For personal inbox, process only owner messages
+        if (!isGroup && !isOwner) return;
+        
+        // Show typing indicator
+        await sendTyping(remoteJid);
+        
+        // Check for commands
+        if (messageText.startsWith(config.PREFIX)) {
+            const command = messageText.slice(1).trim();
+            await handleCommand(sock, remoteJid, command, msg, config, startTime);
         }
     });
 
@@ -121,5 +124,8 @@ async function connectToWhatsApp() {
 }
 
 // Start the bot
-connectToWhatsApp();
-console.log('Starting MARV-C V1 Bot...');
+console.log('🚀 Starting MARV-C V1 Bot...');
+console.log('📱 Please scan the QR code with WhatsApp');
+connectToWhatsApp().catch(err => {
+    console.error('❌ Failed to start bot:', err);
+});
