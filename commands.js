@@ -1,5 +1,4 @@
 const config = require('./config');
-const moment = require('moment');
 
 // Format uptime
 function getUptime(startTime) {
@@ -11,38 +10,16 @@ function getUptime(startTime) {
     return `${String(hours).padStart(2, '0')}hrs${String(minutes).padStart(2, '0')}min${String(seconds).padStart(2, '0')}sec`;
 }
 
-// Main menu buttons
-function getMainMenu() {
-    return {
-        text: `*🤖 MARV-C AUTOMATION V1*\n━━━━━━━━━━━━━━━━━━━━━━\n_Main Menu_\n━━━━━━━━━━━━━━━━━━━━━━\nChoose an option below:`,
-        buttons: [
-            { buttonId: 'uptime', buttonText: { displayText: '⏰ Uptime' }, type: 1 },
-            { buttonId: 'owner', buttonText: { displayText: '👤 Owner' }, type: 1 },
-            { buttonId: 'botinfo', buttonText: { displayText: 'ℹ️ Bot Info' }, type: 1 },
-            { buttonId: 'repo', buttonText: { displayText: '📦 Repo' }, type: 1 },
-            { buttonId: 'sc', buttonText: { displayText: '📋 SC' }, type: 1 },
-            { buttonId: 'antidelete', buttonText: { displayText: '🛡️ Anti-Delete' }, type: 1 },
-        ],
-        viewOnce: true,
-        headerType: 1
-    };
-}
-
-// Group menu buttons
-function getGroupMenu() {
-    return {
-        text: `*👥 Group Menu*\n━━━━━━━━━━━━━━━━━━━━━━\n_Admin Commands_`,
-        buttons: [
-            { buttonId: 'groupinfo', buttonText: { displayText: 'ℹ️ Group Info' }, type: 1 },
-            { buttonId: 'listmembers', buttonText: { displayText: '👥 Members' }, type: 1 },
-            { buttonId: 'tagall', buttonText: { displayText: '📢 Tag All' }, type: 1 },
-            { buttonId: 'left', buttonText: { displayText: '🚪 Leave' }, type: 1 },
-            { buttonId: 'add', buttonText: { displayText: '➕ Add' }, type: 1 },
-            { buttonId: 'kick', buttonText: { displayText: '❌ Kick' }, type: 1 },
-        ],
-        viewOnce: true,
-        headerType: 1
-    };
+// Helper function to check if user is admin
+async function checkIfAdmin(sock, remoteJid, sender) {
+    try {
+        if (!remoteJid.endsWith('@g.us')) return false;
+        const groupMetadata = await sock.groupMetadata(remoteJid);
+        const participant = groupMetadata.participants.find(p => p.id === sender);
+        return participant?.admin === 'admin' || participant?.admin === 'superadmin';
+    } catch (error) {
+        return false;
+    }
 }
 
 // Command handler
@@ -54,17 +31,33 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
     // Split command and args
     const [cmd, ...args] = command.split(' ');
     
-    // Main Menu
+    // Main Menu - Help Command
     if (cmd === 'help' || cmd === 'menu') {
-        if (isGroup) {
-            await sock.sendMessage(remoteJid, getGroupMenu());
-        } else {
-            await sock.sendMessage(remoteJid, getMainMenu());
+        let menuText = `*🤖 MARV-C AUTOMATION V1*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+        menuText += `_Main Menu_\n━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+        menuText += `⏰ *${config.PREFIX}uptime* - Show bot uptime\n`;
+        menuText += `👤 *${config.PREFIX}owner* - Show owner info\n`;
+        menuText += `ℹ️ *${config.PREFIX}botinfo* - Show bot info\n`;
+        menuText += `📦 *${config.PREFIX}repo* - Show repository\n`;
+        menuText += `📋 *${config.PREFIX}sc* - Show source code\n`;
+        menuText += `🛡️ *${config.PREFIX}antidelete* - Toggle anti-delete\n`;
+        
+        if (isGroup && isAdmin) {
+            menuText += `\n*👥 Group Admin Commands*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+            menuText += `ℹ️ *${config.PREFIX}groupinfo* - Show group info\n`;
+            menuText += `👥 *${config.PREFIX}listmembers* - List all members\n`;
+            menuText += `📢 *${config.PREFIX}tagall* - Tag all members\n`;
+            menuText += `📢 *${config.PREFIX}tag @user* - Tag specific user\n`;
+            menuText += `🚪 *${config.PREFIX}left* - Leave group\n`;
+            menuText += `➕ *${config.PREFIX}add number* - Add member\n`;
+            menuText += `❌ *${config.PREFIX}kick number* - Remove member\n`;
         }
+        
+        await sock.sendMessage(remoteJid, { text: menuText });
         return;
     }
     
-    // Handle button clicks and commands
+    // Handle commands
     switch(cmd) {
         case 'uptime':
             const uptime = getUptime(startTime);
@@ -109,68 +102,113 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
         // Group Commands
         case 'groupinfo':
             if (isGroup) {
-                const groupMetadata = await sock.groupMetadata(remoteJid);
-                await sock.sendMessage(remoteJid, {
-                    text: `ℹ️ *Group Information*\n━━━━━━━━━━━━━━━━━━━━━━\n*Name:* ${groupMetadata.subject}\n*Members:* ${groupMetadata.participants.length}\n*Owner:* ${groupMetadata.owner || 'Not available'}\n*Created:* ${new Date(groupMetadata.creation * 1000).toLocaleDateString()}`
-                });
+                try {
+                    const groupMetadata = await sock.groupMetadata(remoteJid);
+                    await sock.sendMessage(remoteJid, {
+                        text: `ℹ️ *Group Information*\n━━━━━━━━━━━━━━━━━━━━━━\n*Name:* ${groupMetadata.subject}\n*Members:* ${groupMetadata.participants.length}\n*Owner:* ${groupMetadata.owner || 'Not available'}\n*Created:* ${new Date(groupMetadata.creation * 1000).toLocaleDateString()}`
+                    });
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Failed to get group info' });
+                }
             }
             break;
             
         case 'listmembers':
-            if (isGroup && isAdmin) {
-                const groupMetadata = await sock.groupMetadata(remoteJid);
-                let memberList = '👥 *Group Members*\n━━━━━━━━━━━━━━━━━━━━━━\n';
-                groupMetadata.participants.forEach((p, index) => {
-                    memberList += `${index + 1}. @${p.id.split('@')[0]}\n`;
-                });
-                await sock.sendMessage(remoteJid, { 
-                    text: memberList,
-                    mentions: groupMetadata.participants.map(p => p.id)
-                });
+            if (isGroup) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                try {
+                    const groupMetadata = await sock.groupMetadata(remoteJid);
+                    let memberList = '👥 *Group Members*\n━━━━━━━━━━━━━━━━━━━━━━\n';
+                    const mentions = [];
+                    groupMetadata.participants.forEach((p, index) => {
+                        const name = p.id.split('@')[0];
+                        memberList += `${index + 1}. @${name}\n`;
+                        mentions.push(p.id);
+                    });
+                    await sock.sendMessage(remoteJid, { 
+                        text: memberList,
+                        mentions: mentions
+                    });
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Failed to list members' });
+                }
             }
             break;
             
         case 'tagall':
-            if (isGroup && isAdmin) {
-                const groupMetadata = await sock.groupMetadata(remoteJid);
-                let tagMessage = '📢 *Tag All*\n━━━━━━━━━━━━━━━━━━━━━━\n';
-                const mentions = groupMetadata.participants.map(p => p.id);
-                mentions.forEach(id => {
-                    tagMessage += `@${id.split('@')[0]}\n`;
-                });
-                await sock.sendMessage(remoteJid, {
-                    text: tagMessage,
-                    mentions: mentions
-                });
+            if (isGroup) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                try {
+                    const groupMetadata = await sock.groupMetadata(remoteJid);
+                    let tagMessage = '📢 *Tag All*\n━━━━━━━━━━━━━━━━━━━━━━\n';
+                    const mentions = groupMetadata.participants.map(p => p.id);
+                    mentions.forEach(id => {
+                        tagMessage += `@${id.split('@')[0]}\n`;
+                    });
+                    await sock.sendMessage(remoteJid, {
+                        text: tagMessage,
+                        mentions: mentions
+                    });
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Failed to tag all' });
+                }
             }
             break;
             
         case 'tag':
-            if (isGroup && isAdmin && args.length > 0) {
-                // Find the user to tag
-                const groupMetadata = await sock.groupMetadata(remoteJid);
-                const targetUser = args[0];
-                const user = groupMetadata.participants.find(p => 
-                    p.id.includes(targetUser) || p.id.split('@')[0] === targetUser
-                );
-                if (user) {
-                    await sock.sendMessage(remoteJid, {
-                        text: `@${user.id.split('@')[0]} ${args.slice(1).join(' ') || ''}`,
-                        mentions: [user.id]
-                    });
+            if (isGroup && args.length > 0) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                try {
+                    const groupMetadata = await sock.groupMetadata(remoteJid);
+                    const targetUser = args[0].replace('@', '');
+                    const user = groupMetadata.participants.find(p => 
+                        p.id.includes(targetUser) || p.id.split('@')[0] === targetUser
+                    );
+                    if (user) {
+                        const message = args.slice(1).join(' ') || 'Hello!';
+                        await sock.sendMessage(remoteJid, {
+                            text: `@${user.id.split('@')[0]} ${message}`,
+                            mentions: [user.id]
+                        });
+                    } else {
+                        await sock.sendMessage(remoteJid, { text: '❌ User not found in group' });
+                    }
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Failed to tag user' });
                 }
             }
             break;
             
         case 'left':
-            if (isGroup && isAdmin) {
-                await sock.groupLeave(remoteJid);
+            if (isGroup) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                try {
+                    await sock.groupLeave(remoteJid);
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Failed to leave group' });
+                }
             }
             break;
             
         case 'add':
-            if (isGroup && isAdmin && args.length > 0) {
-                const number = args[0].replace('+', '');
+            if (isGroup && args.length > 0) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                const number = args[0].replace('+', '').replace(/\s/g, '');
                 const jid = `${number}@s.whatsapp.net`;
                 try {
                     await sock.groupParticipantsUpdate(remoteJid, [jid], 'add');
@@ -179,15 +217,19 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
                     });
                 } catch (error) {
                     await sock.sendMessage(remoteJid, { 
-                        text: `❌ Failed to add ${args[0]}` 
+                        text: `❌ Failed to add ${args[0]}. Make sure the number is valid and has WhatsApp.` 
                     });
                 }
             }
             break;
             
         case 'kick':
-            if (isGroup && isAdmin && args.length > 0) {
-                const number = args[0].replace('+', '');
+            if (isGroup && args.length > 0) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                const number = args[0].replace('+', '').replace(/\s/g, '');
                 const jid = `${number}@s.whatsapp.net`;
                 try {
                     await sock.groupParticipantsUpdate(remoteJid, [jid], 'remove');
@@ -207,18 +249,6 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
             await sock.sendMessage(remoteJid, {
                 text: `❌ Unknown command. Type *${config.PREFIX}help* for menu.`
             });
-    }
-}
-
-// Helper function to check if user is admin
-async function checkIfAdmin(sock, remoteJid, sender) {
-    try {
-        if (!remoteJid.endsWith('@g.us')) return false;
-        const groupMetadata = await sock.groupMetadata(remoteJid);
-        const participant = groupMetadata.participants.find(p => p.id === sender);
-        return participant?.admin === 'admin' || participant?.admin === 'superadmin';
-    } catch (error) {
-        return false;
     }
 }
 
