@@ -2,17 +2,15 @@ const {
     default: makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason,
-    Browsers,
-    jidNormalizedUser,
-    downloadMediaMessage
+    Browsers
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
 const moment = require('moment');
 const config = require('./config');
 const { handleCommand } = require('./commands');
+const qrcode = require('qrcode-terminal');
 
-// Remove the makeInMemoryStore line - it's not needed
 let sock;
 let startTime = Date.now();
 let isTypingTimeout = null;
@@ -46,15 +44,22 @@ async function connectToWhatsApp() {
     sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: true,
+        // Remove printQRInTerminal - it's deprecated
         browser: Browsers.macOS('Chrome'),
         syncFullHistory: false,
         generateHighQualityLinkPreview: true,
     });
 
-    // Set online presence
+    // Handle QR Code display
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
+        
+        // Display QR code when available
+        if (qr) {
+            console.log('\n📱 SCAN THIS QR CODE WITH WHATSAPP:\n');
+            qrcode.generate(qr, { small: true });
+            console.log('\n🔄 Waiting for QR scan...');
+        }
         
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
