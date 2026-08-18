@@ -10,7 +10,7 @@ const config = require('./config');
 const { handleCommand, getMenuText } = require('./commands');
 const express = require('express');
 
-// Force session cleanup on startup (only runs once)
+// Force clean session on startup
 if (fs.existsSync('auth_info')) {
     console.log('🗑️ Clearing old session...');
     fs.rmSync('auth_info', { recursive: true, force: true });
@@ -22,7 +22,6 @@ let startTime = Date.now();
 let isTypingTimeout = null;
 let pairingCode = '';
 let isConnecting = false;
-let phoneNumberInput = '';
 let welcomeSent = false;
 let isConnected = false;
 let reconnectAttempts = 0;
@@ -32,7 +31,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
 
-// Function to show typing indicator
+// Function to send typing indicator
 const sendTyping = async (jid) => {
     try {
         if (!sock || !isConnected) return;
@@ -56,7 +55,7 @@ function getUptime() {
     return `${String(hours).padStart(2, '0')}hrs${String(minutes).padStart(2, '0')}min${String(seconds).padStart(2, '0')}sec`;
 }
 
-// Function to send welcome message
+// Send welcome message
 async function sendWelcomeMessage() {
     if (welcomeSent || !sock || !isConnected) return;
     
@@ -170,8 +169,6 @@ async function connectToWhatsApp() {
                     setTimeout(() => {
                         connectToWhatsApp();
                     }, delay);
-                } else if (reconnectAttempts >= 10) {
-                    console.log('❌ Max reconnect attempts reached. Manual restart required.');
                 }
             } else if (connection === 'open') {
                 console.log('✅ MARV-C V1 Bot is Online!');
@@ -201,7 +198,7 @@ async function connectToWhatsApp() {
             saveCreds();
         });
 
-        // Message handler with debug logging
+        // Message handler
         sock.ev.on('messages.upsert', async (m) => {
             try {
                 if (!isConnected || !sock) {
@@ -218,7 +215,6 @@ async function connectToWhatsApp() {
                 if (msg.key.fromMe) return;
                 if (remoteJid === 'status@broadcast') return;
                 
-                // Extract message text
                 let messageText = '';
                 if (msg.message?.conversation) {
                     messageText = msg.message.conversation;
@@ -238,13 +234,11 @@ async function connectToWhatsApp() {
                 const sender = msg.key.participant || msg.key.remoteJid;
                 const isOwner = sender === `${config.OWNER_NUMBER}@s.whatsapp.net`;
                 
-                // For personal inbox, process only owner messages
                 if (!isGroup && !isOwner) {
                     console.log(`⏭️ Not owner (${sender}), skipping`);
                     return;
                 }
                 
-                // Check for commands
                 if (messageText.startsWith(config.PREFIX)) {
                     console.log(`✅ Command detected: ${messageText}`);
                     const command = messageText.slice(1).trim();
@@ -507,12 +501,12 @@ app.listen(PORT, () => {
 
 // Start the bot
 console.log('🚀 Starting MARV-C V1 Bot...');
-console.log('📱 If this is first run, generate a pairing code via the web interface');
+console.log('📱 Generate a pairing code via the web interface');
 
 // Try to connect
 connectToWhatsApp();
 
-// If connection fails, keep trying
+// Keep trying if connection fails
 setInterval(() => {
     if (!isConnected && !isConnecting) {
         console.log('🔄 Attempting to reconnect...');
