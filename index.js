@@ -8,7 +8,7 @@ const pino = require('pino');
 const fs = require('fs');
 const moment = require('moment');
 const config = require('./config');
-const { handleCommand } = require('./commands');
+const { handleCommand, getMenuText } = require('./commands');
 const express = require('express');
 
 let sock;
@@ -19,6 +19,7 @@ let isConnecting = false;
 let phoneNumberInput = '';
 let codeExpiry = null;
 let codeGenerationAttempts = 0;
+let welcomeSent = false;
 
 // Create express app
 const app = express();
@@ -48,10 +49,78 @@ const updatePresence = async (status) => {
     }
 };
 
+// Function to get uptime
+function getUptime() {
+    const now = Date.now();
+    const diff = now - startTime;
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    return `${String(hours).padStart(2, '0')}hrs${String(minutes).padStart(2, '0')}min${String(seconds).padStart(2, '0')}sec`;
+}
+
+// Function to send welcome message with menu to owner
+async function sendWelcomeMessage() {
+    if (welcomeSent) return;
+    
+    const ownerJid = `${config.OWNER_NUMBER}@s.whatsapp.net`;
+    
+    try {
+        // Get the full menu text
+        const menuText = getMenuText(config.PREFIX);
+        
+        // Create welcome message with menu
+        const welcomeMessage = `*🤖 MARV-C V1 IS NOW ONLINE!*\n` +
+                              `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                              `✅ Successfully connected to your WhatsApp account\n\n` +
+                              `📱 *Bot Info:*\n` +
+                              `• Name: ${config.BOT_NAME}\n` +
+                              `• Owner: ${config.OWNER_NAME}\n` +
+                              `• Status: Online 🟢\n` +
+                              `• Uptime: ${getUptime()}\n` +
+                              `• Connected: ${new Date().toLocaleString()}\n\n` +
+                              `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                              `${menuText}\n` +
+                              `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                              `_Type any command with the prefix *${config.PREFIX}*_\n` +
+                              `_Example: *${config.PREFIX}help*_\n\n` +
+                              `✨ *Enjoy automating with MARV-C V1!* ✨`;
+        
+        // Send the welcome message
+        await sock.sendMessage(ownerJid, {
+            text: welcomeMessage
+        });
+        
+        console.log('📨 Welcome message sent to owner!');
+        welcomeSent = true;
+        
+        // Send a second message with quick commands
+        setTimeout(async () => {
+            try {
+                await sock.sendMessage(ownerJid, {
+                    text: `⚡ *Quick Commands:*\n` +
+                          `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                          `${config.PREFIX}help - Show full menu\n` +
+                          `${config.PREFIX}uptime - Bot uptime\n` +
+                          `${config.PREFIX}owner - Owner info\n` +
+                          `${config.PREFIX}botinfo - Bot details\n` +
+                          `${config.PREFIX}antidelete - Toggle anti-delete\n\n` +
+                          `💡 _Use ${config.PREFIX}help for all commands_`
+                });
+            } catch (error) {
+                console.log('Could not send quick commands:', error);
+            }
+        }, 2000);
+        
+    } catch (error) {
+        console.log('⚠️ Could not send welcome message:', error.message);
+        console.log('Make sure the owner number is correct and saved in contacts');
+    }
+}
+
 // Generate pairing code with proper connection
 async function generatePairingCode(phoneNumber) {
     try {
-        // Remove any formatting from phone number
         const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
         
         if (!sock) {
@@ -62,7 +131,7 @@ async function generatePairingCode(phoneNumber) {
         console.log(`🔑 Generating pairing code for ${cleanNumber}...`);
         const code = await sock.requestPairingCode(cleanNumber);
         pairingCode = code;
-        codeExpiry = Date.now() + 60000; // 1 minute expiry
+        codeExpiry = Date.now() + 60000;
         codeGenerationAttempts++;
         
         console.log('\n========================================');
@@ -90,7 +159,6 @@ async function generatePairingCode(phoneNumber) {
         pairingCode = '';
         codeExpiry = null;
         
-        // Retry after 3 seconds
         setTimeout(() => {
             if (!sock.user && phoneNumber) {
                 generatePairingCode(phoneNumber);
@@ -127,6 +195,7 @@ async function connectToWhatsApp() {
                 const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
                 console.log('Connection closed, reconnecting:', shouldReconnect);
                 isConnecting = false;
+                welcomeSent = false;
                 if (shouldReconnect) {
                     pairingCode = '';
                     codeExpiry = null;
@@ -141,6 +210,9 @@ async function connectToWhatsApp() {
                 pairingCode = '';
                 codeExpiry = null;
                 isConnecting = false;
+                
+                // Send welcome message to owner
+                await sendWelcomeMessage();
             }
         });
 
@@ -201,7 +273,6 @@ app.post('/generate-code', async (req, res) => {
         return res.json({ success: false, error: 'Phone number required' });
     }
     
-    // Validate phone number
     const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
     if (cleanNumber.length < 10 || cleanNumber.length > 15) {
         return res.json({ success: false, error: 'Invalid phone number format' });
@@ -211,14 +282,11 @@ app.post('/generate-code', async (req, res) => {
     pairingCode = '';
     codeExpiry = null;
     
-    // Check if socket is ready
     if (!sock) {
         await connectToWhatsApp();
-        // Wait for socket to be ready
         await new Promise(resolve => setTimeout(resolve, 3000));
     }
     
-    // Generate new code
     const code = await generatePairingCode(cleanNumber);
     
     if (code) {
@@ -234,6 +302,23 @@ app.post('/generate-code', async (req, res) => {
             error: 'Failed to generate code. Retrying...' 
         });
     }
+});
+
+// Status endpoint
+app.get('/status', (req, res) => {
+    const isConnected = sock && sock.user;
+    const status = {
+        connected: isConnected,
+        botName: config.BOT_NAME,
+        phoneNumber: isConnected ? sock.user?.id?.split(':')[0] : 'Not connected',
+        deviceName: isConnected ? sock.user?.name : 'Not connected',
+        uptime: isConnected ? getUptime() : 'Offline',
+        startTime: new Date(startTime).toISOString(),
+        pairingCode: pairingCode || 'None',
+        codeExpiry: codeExpiry ? new Date(codeExpiry).toISOString() : null,
+        welcomeSent: welcomeSent
+    };
+    res.json(status);
 });
 
 // Web interface
@@ -280,6 +365,39 @@ app.get('/', (req, res) => {
                     color: #666;
                     margin-bottom: 30px;
                     font-size: 14px;
+                }
+                .status-indicator {
+                    text-align: center;
+                    margin: 15px 0;
+                    padding: 12px;
+                    border-radius: 10px;
+                    background: #f8f9fa;
+                    display: none;
+                }
+                .status-indicator.show {
+                    display: block;
+                }
+                .status-dot {
+                    display: inline-block;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 50%;
+                    margin-right: 10px;
+                    animation: pulse 2s ease-in-out infinite;
+                }
+                .status-dot.online {
+                    background: #4CAF50;
+                }
+                .status-dot.waiting {
+                    background: #FF9800;
+                }
+                .status-dot.offline {
+                    background: #f44336;
+                }
+                @keyframes pulse {
+                    0% { opacity: 0.6; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.6; }
                 }
                 .input-group {
                     margin-bottom: 20px;
@@ -421,6 +539,25 @@ app.get('/', (req, res) => {
                     vertical-align: middle;
                     margin-right: 10px;
                 }
+                .connected-info {
+                    background: #e8f5e9;
+                    padding: 15px;
+                    border-radius: 10px;
+                    margin-top: 15px;
+                    display: none;
+                    text-align: center;
+                }
+                .connected-info.show {
+                    display: block;
+                }
+                .connected-info h4 {
+                    color: #2e7d32;
+                    margin-bottom: 5px;
+                }
+                .connected-info p {
+                    color: #555;
+                    font-size: 14px;
+                }
                 @keyframes spin {
                     0% { transform: rotate(0deg); }
                     100% { transform: rotate(360deg); }
@@ -441,6 +578,17 @@ app.get('/', (req, res) => {
             <div class="container">
                 <div class="bot-name">🤖 MARV-C V1</div>
                 <div class="subtitle">WhatsApp Automation Bot</div>
+                
+                <div id="statusIndicator" class="status-indicator">
+                    <span id="statusDot" class="status-dot waiting"></span>
+                    <span id="statusText">Connecting...</span>
+                </div>
+                
+                <div id="connectedInfo" class="connected-info">
+                    <h4>✅ Bot is Connected!</h4>
+                    <p id="connectedNumber">Your WhatsApp number</p>
+                    <p style="font-size:12px;margin-top:5px;color:#888;">Check your WhatsApp inbox for the welcome message</p>
+                </div>
                 
                 <div class="input-group">
                     <label for="phoneInput">📱 Enter WhatsApp Number</label>
@@ -468,7 +616,7 @@ app.get('/', (req, res) => {
                         <li>Go to <strong>Settings</strong> → <strong>Linked Devices</strong></li>
                         <li>Tap <strong>"Link a Device"</strong></li>
                         <li>Enter the 8-digit code shown above</li>
-                        <li>Wait for connection confirmation</li>
+                        <li>Wait for the welcome message in your inbox</li>
                     </ol>
                 </div>
             </div>
@@ -484,6 +632,11 @@ app.get('/', (req, res) => {
                 const timerCount = document.getElementById('timerCount');
                 const statusMessage = document.getElementById('statusMessage');
                 const steps = document.getElementById('steps');
+                const statusIndicator = document.getElementById('statusIndicator');
+                const statusDot = document.getElementById('statusDot');
+                const statusText = document.getElementById('statusText');
+                const connectedInfo = document.getElementById('connectedInfo');
+                const connectedNumber = document.getElementById('connectedNumber');
                 
                 generateBtn.addEventListener('click', generateCode);
                 phoneInput.addEventListener('keypress', (e) => {
@@ -498,14 +651,12 @@ app.get('/', (req, res) => {
                         return;
                     }
                     
-                    // Validate number
                     const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
                     if (cleanNumber.length < 10 || cleanNumber.length > 15) {
                         showStatus('Invalid phone number. Must be 10-15 digits with country code.', 'error');
                         return;
                     }
                     
-                    // Disable button and show loading
                     generateBtn.disabled = true;
                     generateBtn.innerHTML = '<span class="loading-spinner"></span> Generating...';
                     hideStatus();
@@ -522,16 +673,11 @@ app.get('/', (req, res) => {
                         const data = await response.json();
                         
                         if (data.success) {
-                            // Show code
                             codeNumber.textContent = data.code;
                             codeDisplay.classList.add('show');
                             steps.classList.add('show');
                             showStatus('✅ Code generated successfully!', 'success');
-                            
-                            // Start timer
                             startTimer(60);
-                            
-                            // Store phone number
                             localStorage.setItem('lastPhoneNumber', cleanNumber);
                         } else {
                             showStatus('❌ ' + (data.error || 'Failed to generate code'), 'error');
@@ -556,7 +702,6 @@ app.get('/', (req, res) => {
                         
                         if (countdown <= 0) {
                             clearInterval(timerInterval);
-                            // Auto-refresh code
                             generateCode();
                         }
                     }, 1000);
@@ -571,7 +716,36 @@ app.get('/', (req, res) => {
                     statusMessage.className = 'status-message';
                 }
                 
-                // Load last phone number if exists
+                async function checkStatus() {
+                    try {
+                        const response = await fetch('/status');
+                        const data = await response.json();
+                        
+                        statusIndicator.classList.add('show');
+                        
+                        if (data.connected) {
+                            statusDot.className = 'status-dot online';
+                            statusText.textContent = '✅ Connected as ' + data.phoneNumber;
+                            connectedInfo.classList.add('show');
+                            connectedNumber.textContent = '📱 ' + data.phoneNumber;
+                            if (data.welcomeSent) {
+                                document.querySelector('#connectedInfo p:last-child').textContent = '✅ Welcome message sent to your inbox!';
+                            }
+                        } else {
+                            statusDot.className = 'status-dot waiting';
+                            statusText.textContent = '🔄 Waiting for connection...';
+                            connectedInfo.classList.remove('show');
+                        }
+                    } catch (error) {
+                        console.log('Status check failed:', error);
+                    }
+                }
+                
+                // Check status every 3 seconds
+                setInterval(checkStatus, 3000);
+                checkStatus();
+                
+                // Load last phone number
                 const lastNumber = localStorage.getItem('lastPhoneNumber');
                 if (lastNumber) {
                     phoneInput.value = lastNumber;
@@ -588,7 +762,7 @@ app.listen(PORT, () => {
     console.log(`📱 Visit your Render URL to get pairing code`);
 });
 
-// Start the bot with a delay
+// Start the bot
 console.log('🚀 Starting MARV-C V1 Bot...');
 console.log('⏳ Initializing connection, please wait...');
 
