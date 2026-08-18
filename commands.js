@@ -180,4 +180,84 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
                     const groupMetadata = await sock.groupMetadata(remoteJid);
                     const targetUser = args[0].replace('@', '');
                     const user = groupMetadata.participants.find(p => 
-                        p.id.includes(targetUser) || p.id.split('@')[
+                        p.id.includes(targetUser) || p.id.split('@')[0] === targetUser
+                    );
+                    if (user) {
+                        const message = args.slice(1).join(' ') || 'Hello!';
+                        await sock.sendMessage(remoteJid, {
+                            text: `@${user.id.split('@')[0]} ${message}`,
+                            mentions: [user.id]
+                        });
+                    } else {
+                        await sock.sendMessage(remoteJid, { text: '❌ User not found in group' });
+                    }
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Failed to tag user' });
+                }
+            }
+            break;
+            
+        case 'left':
+            if (isGroup) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                try {
+                    await sock.groupLeave(remoteJid);
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Failed to leave group' });
+                }
+            }
+            break;
+            
+        case 'add':
+            if (isGroup && args.length > 0) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                const number = args[0].replace('+', '').replace(/\s/g, '');
+                const jid = `${number}@s.whatsapp.net`;
+                try {
+                    await sock.groupParticipantsUpdate(remoteJid, [jid], 'add');
+                    await sock.sendMessage(remoteJid, { 
+                        text: `✅ Added ${args[0]} to the group` 
+                    });
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { 
+                        text: `❌ Failed to add ${args[0]}. Make sure the number is valid and has WhatsApp.` 
+                    });
+                }
+            }
+            break;
+            
+        case 'kick':
+            if (isGroup && args.length > 0) {
+                if (!isAdmin) {
+                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
+                    break;
+                }
+                const number = args[0].replace('+', '').replace(/\s/g, '');
+                const jid = `${number}@s.whatsapp.net`;
+                try {
+                    await sock.groupParticipantsUpdate(remoteJid, [jid], 'remove');
+                    await sock.sendMessage(remoteJid, { 
+                        text: `✅ Removed ${args[0]} from the group` 
+                    });
+                } catch (error) {
+                    await sock.sendMessage(remoteJid, { 
+                        text: `❌ Failed to remove ${args[0]}` 
+                    });
+                }
+            }
+            break;
+            
+        default:
+            await sock.sendMessage(remoteJid, {
+                text: `❌ Unknown command. Type *${config.PREFIX}help* for menu.`
+            });
+    }
+}
+
+module.exports = { handleCommand, getMenuText };
