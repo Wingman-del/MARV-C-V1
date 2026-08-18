@@ -11,4 +11,10 @@ if (fs.existsSync(tempDir)) {
 }
 
 // Clean old logs
-const logDir = './logs
+const logDir = './logs';
+if (fs.existsSync(logDir)) {
+    fs.rmSync(logDir, { recursive: true, force: true });
+    console.log('✅ Logs folder cleaned');
+}
+
+console.log('✅ Cleanup complete!');
