@@ -6,4 +6,6 @@ module.exports = {
     REPO_LINK: 'https://github.com/Wingman-del/MARV-C-V1',
     ANTI_DELETE: false,
     TYPING_DELAY: 15000, // 15 seconds
+    VERSION: '1.0.0',
+    SESSION_DIR: './session'
 };
