@@ -89,7 +89,7 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
         case 'botinfo':
             console.log('ℹ️ Showing bot info');
             await sock.sendMessage(remoteJid, {
-                text: `ℹ️ *Bot Information*\n━━━━━━━━━━━━━━━━━━━━━━\n${config.BOT_NAME} is a simple WhatsApp assistant that helps with small tasks.\n\n*Prefix:* ${config.PREFIX}\n*Status:* Online 🟢\n*Uptime:* ${getUptime(startTime)}`
+                text: `ℹ️ *Bot Information*\n━━━━━━━━━━━━━━━━━━━━━━\n${config.BOT_NAME} is a simple WhatsApp assistant that helps with small tasks.\n\n*Prefix:* ${config.PREFIX}\n*Status:* Online 🟢\n*Uptime:* ${getUptime(startTime)}\n*Version:* ${config.VERSION}`
             });
             break;
             
