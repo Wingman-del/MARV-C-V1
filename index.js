@@ -5,9 +5,17 @@ const {
     Browsers
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
+const fs = require('fs');
 const config = require('./config');
 const { handleCommand, getMenuText } = require('./commands');
 const express = require('express');
+
+// Force session cleanup on startup (only runs once)
+if (fs.existsSync('auth_info')) {
+    console.log('🗑️ Clearing old session...');
+    fs.rmSync('auth_info', { recursive: true, force: true });
+    console.log('✅ Session cleared!');
+}
 
 let sock;
 let startTime = Date.now();
@@ -32,7 +40,7 @@ const sendTyping = async (jid) => {
         if (isTypingTimeout) clearTimeout(isTypingTimeout);
         isTypingTimeout = setTimeout(() => {
             sock.sendPresenceUpdate('paused', jid);
-        }, config.TYPING_DELAY);
+        }, config.TYPING_DELAY || 15000);
     } catch (error) {
         console.log('Typing error:', error);
     }
@@ -117,10 +125,15 @@ async function generatePairingCode(phoneNumber) {
 
 // Main connection function
 async function connectToWhatsApp() {
-    if (isConnecting) return;
+    if (isConnecting) {
+        console.log('⏳ Already connecting...');
+        return;
+    }
     isConnecting = true;
+    isConnected = false;
     
     try {
+        console.log('🔌 Initializing WhatsApp connection...');
         const { state, saveCreds } = await useMultiFileAuthState('auth_info');
         
         sock = makeWASocket({
@@ -133,23 +146,32 @@ async function connectToWhatsApp() {
             defaultQueryTimeoutMs: 60000,
             keepAliveIntervalMs: 10000,
             markOnlineOnConnect: true,
+            shouldSyncHistoryMessage: () => false,
         });
 
         // Handle connection updates
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect } = update;
             
+            console.log(`📡 Connection update: ${connection}`);
+            
             if (connection === 'close') {
-                const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-                console.log('❌ Connection closed, reconnecting:', shouldReconnect);
+                const code = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = code !== DisconnectReason.loggedOut;
+                console.log(`❌ Connection closed. Code: ${code}, Should reconnect: ${shouldReconnect}`);
                 isConnecting = false;
                 isConnected = false;
                 welcomeSent = false;
                 
-                if (shouldReconnect && reconnectAttempts < 5) {
+                if (shouldReconnect && reconnectAttempts < 10) {
                     reconnectAttempts++;
-                    console.log(`🔄 Reconnect attempt ${reconnectAttempts}/5`);
-                    setTimeout(() => connectToWhatsApp(), 5000 * reconnectAttempts);
+                    const delay = 5000 * Math.min(reconnectAttempts, 5);
+                    console.log(`🔄 Reconnect attempt ${reconnectAttempts}/10 in ${delay/1000}s`);
+                    setTimeout(() => {
+                        connectToWhatsApp();
+                    }, delay);
+                } else if (reconnectAttempts >= 10) {
+                    console.log('❌ Max reconnect attempts reached. Manual restart required.');
                 }
             } else if (connection === 'open') {
                 console.log('✅ MARV-C V1 Bot is Online!');
@@ -164,47 +186,37 @@ async function connectToWhatsApp() {
                 
                 // Send welcome message after connection
                 setTimeout(async () => {
-                    await sendWelcomeMessage();
+                    if (!welcomeSent && isConnected) {
+                        await sendWelcomeMessage();
+                    }
                 }, 3000);
+            } else if (connection === 'connecting') {
+                console.log('🔄 Connecting to WhatsApp...');
             }
         });
 
         // Save credentials
-        sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', (creds) => {
+            console.log('💾 Credentials updated and saved');
+            saveCreds();
+        });
 
-        // Message handler - SIMPLIFIED AND DEBUGGED
+        // Message handler with debug logging
         sock.ev.on('messages.upsert', async (m) => {
             try {
-                // Debug: Log when message is received
-                console.log('📩 Message received event triggered');
-                
                 if (!isConnected || !sock) {
                     console.log('⚠️ Bot not connected, skipping message');
                     return;
                 }
                 
                 const msg = m.messages[0];
-                if (!msg || !msg.key) {
-                    console.log('⚠️ No message or key');
-                    return;
-                }
+                if (!msg || !msg.key) return;
                 
                 const remoteJid = msg.key.remoteJid;
-                if (!remoteJid) {
-                    console.log('⚠️ No remote JID');
-                    return;
-                }
+                if (!remoteJid) return;
                 
-                // Ignore messages from the bot itself
-                if (msg.key.fromMe) {
-                    console.log('⏭️ Skipping own message');
-                    return;
-                }
-                
-                if (remoteJid === 'status@broadcast') {
-                    console.log('⏭️ Skipping status broadcast');
-                    return;
-                }
+                if (msg.key.fromMe) return;
+                if (remoteJid === 'status@broadcast') return;
                 
                 // Extract message text
                 let messageText = '';
@@ -218,22 +230,17 @@ async function connectToWhatsApp() {
                     messageText = msg.message.videoMessage.caption;
                 }
                 
-                console.log(`📨 Message from ${remoteJid}: "${messageText}"`);
+                if (!messageText) return;
                 
-                if (!messageText) {
-                    console.log('⏭️ No text in message');
-                    return;
-                }
+                console.log(`📨 Message from ${remoteJid}: "${messageText}"`);
                 
                 const isGroup = remoteJid.endsWith('@g.us');
                 const sender = msg.key.participant || msg.key.remoteJid;
                 const isOwner = sender === `${config.OWNER_NUMBER}@s.whatsapp.net`;
                 
-                console.log(`📊 Sender: ${sender}, IsOwner: ${isOwner}, IsGroup: ${isGroup}`);
-                
                 // For personal inbox, process only owner messages
                 if (!isGroup && !isOwner) {
-                    console.log('⏭️ Not owner, skipping');
+                    console.log(`⏭️ Not owner (${sender}), skipping`);
                     return;
                 }
                 
@@ -242,18 +249,12 @@ async function connectToWhatsApp() {
                     console.log(`✅ Command detected: ${messageText}`);
                     const command = messageText.slice(1).trim();
                     
-                    // Show typing indicator
                     await sendTyping(remoteJid);
-                    
-                    // Handle command
                     await handleCommand(sock, remoteJid, command, msg, config, startTime);
                     console.log('✅ Command processed');
-                } else {
-                    console.log(`⏭️ Not a command (starts with ${config.PREFIX}): ${messageText}`);
                 }
             } catch (error) {
                 console.error('❌ Error in message handler:', error);
-                console.error('Error stack:', error.stack);
             }
         });
 
@@ -304,10 +305,12 @@ app.get('/status', (req, res) => {
         phoneNumber: (isConnected && sock?.user) ? sock.user.id?.split(':')[0] : 'Not connected',
         uptime: isConnected ? getUptime() : 'Offline',
         pairingCode: pairingCode || 'None',
-        welcomeSent: welcomeSent
+        welcomeSent: welcomeSent,
+        reconnectAttempts: reconnectAttempts
     });
 });
 
+// Web interface
 app.get('/', (req, res) => {
     const html = `
         <!DOCTYPE html>
@@ -504,6 +507,15 @@ app.listen(PORT, () => {
 
 // Start the bot
 console.log('🚀 Starting MARV-C V1 Bot...');
-connectToWhatsApp().catch(err => {
-    console.error('❌ Failed to start bot:', err);
-});
+console.log('📱 If this is first run, generate a pairing code via the web interface');
+
+// Try to connect
+connectToWhatsApp();
+
+// If connection fails, keep trying
+setInterval(() => {
+    if (!isConnected && !isConnecting) {
+        console.log('🔄 Attempting to reconnect...');
+        connectToWhatsApp();
+    }
+}, 30000);
