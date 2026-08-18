@@ -10,6 +10,34 @@ function getUptime(startTime) {
     return `${String(hours).padStart(2, '0')}hrs${String(minutes).padStart(2, '0')}min${String(seconds).padStart(2, '0')}sec`;
 }
 
+// Get menu text
+function getMenuText(prefix) {
+    let menuText = `*🤖 MARV-C V1 - MAIN MENU*\n`;
+    menuText += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    menuText += `📋 *Basic Commands:*\n`;
+    menuText += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    menuText += `⏰ *${prefix}uptime* - Show bot uptime\n`;
+    menuText += `👤 *${prefix}owner* - Show owner info\n`;
+    menuText += `ℹ️ *${prefix}botinfo* - Show bot info\n`;
+    menuText += `📦 *${prefix}repo* - Show repository\n`;
+    menuText += `📋 *${prefix}sc* - Show source code\n`;
+    menuText += `🛡️ *${prefix}antidelete* - Toggle anti-delete\n`;
+    menuText += `❓ *${prefix}help* - Show this menu\n\n`;
+    menuText += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    menuText += `👥 *Group Admin Commands:*\n`;
+    menuText += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    menuText += `ℹ️ *${prefix}groupinfo* - Show group info\n`;
+    menuText += `👥 *${prefix}listmembers* - List all members\n`;
+    menuText += `📢 *${prefix}tagall* - Tag all members\n`;
+    menuText += `📢 *${prefix}tag @user* - Tag specific user\n`;
+    menuText += `🚪 *${prefix}left* - Leave group\n`;
+    menuText += `➕ *${prefix}add number* - Add member\n`;
+    menuText += `❌ *${prefix}kick number* - Remove member\n\n`;
+    menuText += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    menuText += `💡 *Tip:* Send ${prefix}help to show this menu anytime`;
+    return menuText;
+}
+
 // Helper function to check if user is admin
 async function checkIfAdmin(sock, remoteJid, sender) {
     try {
@@ -33,26 +61,7 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
     
     // Main Menu - Help Command
     if (cmd === 'help' || cmd === 'menu') {
-        let menuText = `*🤖 MARV-C AUTOMATION V1*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-        menuText += `_Main Menu_\n━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-        menuText += `⏰ *${config.PREFIX}uptime* - Show bot uptime\n`;
-        menuText += `👤 *${config.PREFIX}owner* - Show owner info\n`;
-        menuText += `ℹ️ *${config.PREFIX}botinfo* - Show bot info\n`;
-        menuText += `📦 *${config.PREFIX}repo* - Show repository\n`;
-        menuText += `📋 *${config.PREFIX}sc* - Show source code\n`;
-        menuText += `🛡️ *${config.PREFIX}antidelete* - Toggle anti-delete\n`;
-        
-        if (isGroup && isAdmin) {
-            menuText += `\n*👥 Group Admin Commands*\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-            menuText += `ℹ️ *${config.PREFIX}groupinfo* - Show group info\n`;
-            menuText += `👥 *${config.PREFIX}listmembers* - List all members\n`;
-            menuText += `📢 *${config.PREFIX}tagall* - Tag all members\n`;
-            menuText += `📢 *${config.PREFIX}tag @user* - Tag specific user\n`;
-            menuText += `🚪 *${config.PREFIX}left* - Leave group\n`;
-            menuText += `➕ *${config.PREFIX}add number* - Add member\n`;
-            menuText += `❌ *${config.PREFIX}kick number* - Remove member\n`;
-        }
-        
+        const menuText = getMenuText(config.PREFIX);
         await sock.sendMessage(remoteJid, { text: menuText });
         return;
     }
@@ -74,7 +83,7 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
             
         case 'botinfo':
             await sock.sendMessage(remoteJid, {
-                text: `ℹ️ *Bot Information*\n━━━━━━━━━━━━━━━━━━━━━━\n${config.BOT_NAME} is a simple WhatsApp assistant that helps with small tasks.\n\n*Prefix:* ${config.PREFIX}\n*Status:* Online`
+                text: `ℹ️ *Bot Information*\n━━━━━━━━━━━━━━━━━━━━━━\n${config.BOT_NAME} is a simple WhatsApp assistant that helps with small tasks.\n\n*Prefix:* ${config.PREFIX}\n*Status:* Online 🟢\n*Uptime:* ${getUptime(startTime)}`
             });
             break;
             
@@ -171,85 +180,4 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
                     const groupMetadata = await sock.groupMetadata(remoteJid);
                     const targetUser = args[0].replace('@', '');
                     const user = groupMetadata.participants.find(p => 
-                        p.id.includes(targetUser) || p.id.split('@')[0] === targetUser
-                    );
-                    if (user) {
-                        const message = args.slice(1).join(' ') || 'Hello!';
-                        await sock.sendMessage(remoteJid, {
-                            text: `@${user.id.split('@')[0]} ${message}`,
-                            mentions: [user.id]
-                        });
-                    } else {
-                        await sock.sendMessage(remoteJid, { text: '❌ User not found in group' });
-                    }
-                } catch (error) {
-                    await sock.sendMessage(remoteJid, { text: '❌ Failed to tag user' });
-                }
-            }
-            break;
-            
-        case 'left':
-            if (isGroup) {
-                if (!isAdmin) {
-                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
-                    break;
-                }
-                try {
-                    await sock.groupLeave(remoteJid);
-                } catch (error) {
-                    await sock.sendMessage(remoteJid, { text: '❌ Failed to leave group' });
-                }
-            }
-            break;
-            
-        case 'add':
-            if (isGroup && args.length > 0) {
-                if (!isAdmin) {
-                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
-                    break;
-                }
-                const number = args[0].replace('+', '').replace(/\s/g, '');
-                const jid = `${number}@s.whatsapp.net`;
-                try {
-                    await sock.groupParticipantsUpdate(remoteJid, [jid], 'add');
-                    await sock.sendMessage(remoteJid, { 
-                        text: `✅ Added ${args[0]} to the group` 
-                    });
-                } catch (error) {
-                    await sock.sendMessage(remoteJid, { 
-                        text: `❌ Failed to add ${args[0]}. Make sure the number is valid and has WhatsApp.` 
-                    });
-                }
-            }
-            break;
-            
-        case 'kick':
-            if (isGroup && args.length > 0) {
-                if (!isAdmin) {
-                    await sock.sendMessage(remoteJid, { text: '❌ Only admins can use this command' });
-                    break;
-                }
-                const number = args[0].replace('+', '').replace(/\s/g, '');
-                const jid = `${number}@s.whatsapp.net`;
-                try {
-                    await sock.groupParticipantsUpdate(remoteJid, [jid], 'remove');
-                    await sock.sendMessage(remoteJid, { 
-                        text: `✅ Removed ${args[0]} from the group` 
-                    });
-                } catch (error) {
-                    await sock.sendMessage(remoteJid, { 
-                        text: `❌ Failed to remove ${args[0]}` 
-                    });
-                }
-            }
-            break;
-            
-        default:
-            // Unknown command
-            await sock.sendMessage(remoteJid, {
-                text: `❌ Unknown command. Type *${config.PREFIX}help* for menu.`
-            });
-    }
-}
-
-module.exports = { handleCommand };
+                        p.id.includes(targetUser) || p.id.split('@')[
