@@ -1,6 +1,5 @@
 const config = require('./config');
 
-// Format uptime
 function getUptime(startTime) {
     const now = Date.now();
     const diff = now - startTime;
@@ -10,7 +9,6 @@ function getUptime(startTime) {
     return `${String(hours).padStart(2, '0')}hrs${String(minutes).padStart(2, '0')}min${String(seconds).padStart(2, '0')}sec`;
 }
 
-// Get menu text
 function getMenuText(prefix) {
     let menuText = `*🤖 MARV-C V1 - MAIN MENU*\n`;
     menuText += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
@@ -38,7 +36,6 @@ function getMenuText(prefix) {
     return menuText;
 }
 
-// Helper function to check if user is admin
 async function checkIfAdmin(sock, remoteJid, sender) {
     try {
         if (!remoteJid.endsWith('@g.us')) return false;
@@ -50,50 +47,61 @@ async function checkIfAdmin(sock, remoteJid, sender) {
     }
 }
 
-// Command handler
 async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
+    console.log(`🔄 Processing command: ${command}`);
+    
     const isGroup = remoteJid.endsWith('@g.us');
     const sender = msg.key.participant || msg.key.remoteJid;
     const isAdmin = await checkIfAdmin(sock, remoteJid, sender);
     
-    // Split command and args
     const [cmd, ...args] = command.split(' ');
+    console.log(`📋 Command: ${cmd}, Args: ${args}`);
     
     // Main Menu - Help Command
     if (cmd === 'help' || cmd === 'menu') {
+        console.log('📋 Showing menu');
         const menuText = getMenuText(config.PREFIX);
         await sock.sendMessage(remoteJid, { text: menuText });
         return;
     }
     
-    // Handle commands
     switch(cmd) {
+        case 'ping':
+            console.log('🏓 Pong!');
+            await sock.sendMessage(remoteJid, { text: '🏓 Pong!' });
+            break;
+            
         case 'uptime':
             const uptime = getUptime(startTime);
+            console.log(`⏰ Uptime: ${uptime}`);
             await sock.sendMessage(remoteJid, { 
                 text: `⏰ *Bot Uptime*\n━━━━━━━━━━━━━━━━━━━━━━\n${uptime}` 
             });
             break;
             
         case 'owner':
+            console.log('👤 Showing owner');
             await sock.sendMessage(remoteJid, {
                 text: `👤 *Owner Information*\n━━━━━━━━━━━━━━━━━━━━━━\n*Name:* ${config.OWNER_NAME}\n*WhatsApp:* ${config.OWNER_NUMBER}`
             });
             break;
             
         case 'botinfo':
+            console.log('ℹ️ Showing bot info');
             await sock.sendMessage(remoteJid, {
                 text: `ℹ️ *Bot Information*\n━━━━━━━━━━━━━━━━━━━━━━\n${config.BOT_NAME} is a simple WhatsApp assistant that helps with small tasks.\n\n*Prefix:* ${config.PREFIX}\n*Status:* Online 🟢\n*Uptime:* ${getUptime(startTime)}`
             });
             break;
             
         case 'repo':
+            console.log('📦 Showing repo');
             await sock.sendMessage(remoteJid, {
                 text: `📦 *Repository*\n━━━━━━━━━━━━━━━━━━━━━━\n${config.REPO_LINK}`
             });
             break;
             
         case 'sc':
+            console.log('📋 Showing source code');
             await sock.sendMessage(remoteJid, {
                 text: `📋 *Source Code*\n━━━━━━━━━━━━━━━━━━━━━━\n*Repo:* ${config.REPO_LINK}\n*Owner:* ${config.OWNER_NAME}\n*Number:* ${config.OWNER_NUMBER}\n\n━━━━━━━━━━━━━━━━━━━━━━\n✨ *Enjoy!* ✨`
             });
@@ -102,6 +110,7 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
         case 'antidelete':
             if (!isGroup) {
                 config.ANTI_DELETE = !config.ANTI_DELETE;
+                console.log(`🛡️ Anti-Delete toggled: ${config.ANTI_DELETE}`);
                 await sock.sendMessage(remoteJid, {
                     text: `🛡️ *Anti-Delete*\n━━━━━━━━━━━━━━━━━━━━━━\nStatus: ${config.ANTI_DELETE ? '✅ ON' : '❌ OFF'}`
                 });
@@ -254,6 +263,7 @@ async function handleCommand(sock, remoteJid, command, msg, config, startTime) {
             break;
             
         default:
+            console.log(`❌ Unknown command: ${cmd}`);
             await sock.sendMessage(remoteJid, {
                 text: `❌ Unknown command. Type *${config.PREFIX}help* for menu.`
             });
